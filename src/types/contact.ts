@@ -6,13 +6,22 @@
  */
 
 export interface Contact {
-  id: string; // In MongoDB, this will correspond to document._id
+  id: string; // In MongoDB, this corresponds to document._id / virtual id
+  _id?: string;
   name: string;
   email: string;
   phone: string;
   createdAt: string; // ISO date string
+  updatedAt?: string;
+  isActive?: boolean;
   status?: 'active' | 'inactive';
   avatarBg?: string; // Color token for initials avatar
+}
+
+export interface ContactStats {
+  totalContacts: number;
+  activeContacts: number;
+  recentlyAdded: number;
 }
 
 export interface ContactFormData {

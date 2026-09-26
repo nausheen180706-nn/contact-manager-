@@ -1,177 +1,226 @@
-import { Contact, ContactFormData } from '../types/contact';
-import { INITIAL_CONTACTS, AVATAR_COLORS } from '../data/mockContacts';
+import { Contact, ContactFormData, ContactStats } from '../types/contact';
+import { AVATAR_COLORS } from '../data/mockContacts';
 
 /**
  * ============================================================================
- * FULL STACK WEBINAR PREPARATION NOTE:
+ * FULL STACK WEBINAR: REAL REST API CLIENT
  * ============================================================================
- * In production, you will connect this service to your Node.js + Express backend:
- * 
- * const API_BASE_URL = 'http://localhost:5000/api/contacts';
- * 
- * For this webinar demonstration, we simulate REST API network requests with
- * async Promises and browser storage. When your backend is ready, simply
- * swap the simulated logic with fetch() or axios calls shown in the comments!
+ * Communicates with the Express.js + MongoDB backend:
+ * GET    /api/contacts
+ * POST   /api/contacts
+ * PUT    /api/contacts/:id
+ * DELETE /api/contacts/:id
+ * GET    /api/contacts/stats
+ * PATCH  /api/contacts/:id/status
+ * GET    /api/health
  * ============================================================================
  */
 
-// Toggle this or change API_BASE_URL when connecting your real Express server!
-export const API_BASE_URL = 'http://localhost:5000/api/contacts';
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_URL as string) || 'http://localhost:5000/api';
 
-const STORAGE_KEY = 'contact_manager_demo_contacts';
+const CONTACTS_URL = `${API_BASE_URL}/contacts`;
 
-// Initialize in-memory or localStorage state
-const loadInitialContacts = (): Contact[] => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (err) {
-    console.warn('Could not read from localStorage, using initial mock data', err);
-  }
-  return [...INITIAL_CONTACTS];
+// Helper to assign consistent avatar background color based on name/id
+const formatContact = (item: any): Contact => {
+  const id = item.id || item._id || '';
+  const hash = (item.name || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+  const colorIndex = Math.abs(hash) % AVATAR_COLORS.length;
+
+  return {
+    id: id,
+    _id: item._id || id,
+    name: item.name || '',
+    email: item.email || '',
+    phone: item.phone || '',
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt,
+    isActive: typeof item.isActive === 'boolean' ? item.isActive : true,
+    status: item.isActive === false ? 'inactive' : 'active',
+    avatarBg: item.avatarBg || AVATAR_COLORS[colorIndex]
+  };
 };
 
-let localContacts: Contact[] = loadInitialContacts();
-
-const persistContacts = () => {
+/**
+ * Check backend health status
+ * GET /api/health
+ */
+export async function checkApiHealth(): Promise<boolean> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(localContacts));
-  } catch (err) {
-    console.warn('Could not save to localStorage', err);
+    const response = await fetch(`${API_BASE_URL}/health`);
+    if (!response.ok) return false;
+    const json = await response.json();
+    return json.success === true;
+  } catch (error) {
+    return false;
   }
-};
-
-// Simulated network latency (150ms) to give realistic async feel during demonstration
-const delay = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * GET /api/contacts
- * Retrieve all contacts from the database
+ * Retrieve all contacts from MongoDB, sorted by newest first
  */
 export async function getContacts(): Promise<Contact[]> {
-  await delay(120);
+  const response = await fetch(CONTACTS_URL);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to fetch contacts from server');
+  }
 
-  /*
-  // WEBINAR INTEGRATION STEP:
-  // const response = await fetch(API_BASE_URL);
-  // if (!response.ok) throw new Error('Failed to fetch contacts');
-  // return await response.json();
-  */
+  const result = await response.json();
+  const rawContacts = Array.isArray(result.data) ? result.data : [];
+  return rawContacts.map(formatContact);
+}
 
-  return [...localContacts];
+/**
+ * GET /api/contacts/:id
+ * Retrieve a single contact by MongoDB ID
+ */
+export async function getContactById(id: string): Promise<Contact> {
+  const response = await fetch(`${CONTACTS_URL}/${id}`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || `Failed to fetch contact ${id}`);
+  }
+
+  const result = await response.json();
+  return formatContact(result.data);
+}
+
+/**
+ * GET /api/contacts?search=query
+ * Search contacts by name, email, or phone
+ */
+export async function searchContacts(search: string): Promise<Contact[]> {
+  const url = search.trim()
+    ? `${CONTACTS_URL}?search=${encodeURIComponent(search.trim())}`
+    : CONTACTS_URL;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to search contacts');
+  }
+
+  const result = await response.json();
+  const rawContacts = Array.isArray(result.data) ? result.data : [];
+  return rawContacts.map(formatContact);
+}
+
+/**
+ * GET /api/contacts/stats
+ * Retrieve dashboard statistics calculated from MongoDB
+ */
+export async function getContactStats(): Promise<ContactStats> {
+  const response = await fetch(`${CONTACTS_URL}/stats`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to fetch contact statistics');
+  }
+
+  const result = await response.json();
+  return {
+    totalContacts: result.data?.totalContacts ?? 0,
+    activeContacts: result.data?.activeContacts ?? 0,
+    recentlyAdded: result.data?.recentlyAdded ?? 0
+  };
 }
 
 /**
  * POST /api/contacts
- * Create a new contact document
+ * Create a new contact document in MongoDB
  */
 export async function createContact(contactData: ContactFormData): Promise<Contact> {
-  await delay(200);
+  const response = await fetch(CONTACTS_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: contactData.name.trim(),
+      email: contactData.email.trim().toLowerCase(),
+      phone: contactData.phone.trim()
+    })
+  });
 
-  /*
-  // WEBINAR INTEGRATION STEP:
-  // const response = await fetch(API_BASE_URL, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(contactData),
-  // });
-  // if (!response.ok) throw new Error('Failed to create contact');
-  // return await response.json();
-  */
+  const result = await response.json().catch(() => ({}));
 
-  // Generate random avatar color and simulated MongoDB ObjectId format
-  const colorIndex = localContacts.length % AVATAR_COLORS.length;
-  const newContact: Contact = {
-    id: `c_${Date.now().toString(16)}${Math.random().toString(16).substring(2, 6)}`,
-    name: contactData.name.trim(),
-    email: contactData.email.trim().toLowerCase(),
-    phone: contactData.phone.trim(),
-    createdAt: new Date().toISOString(),
-    status: 'active',
-    avatarBg: AVATAR_COLORS[colorIndex]
-  };
+  if (!response.ok) {
+    throw new Error(result.message || 'Failed to create contact');
+  }
 
-  // Add to top of list
-  localContacts = [newContact, ...localContacts];
-  persistContacts();
-
-  return newContact;
+  return formatContact(result.data);
 }
 
 /**
  * PUT /api/contacts/:id
- * Update an existing contact document
+ * Update an existing contact document in MongoDB
  */
 export async function updateContact(id: string, contactData: ContactFormData): Promise<Contact> {
-  await delay(180);
+  const response = await fetch(`${CONTACTS_URL}/${id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: contactData.name.trim(),
+      email: contactData.email.trim().toLowerCase(),
+      phone: contactData.phone.trim()
+    })
+  });
 
-  /*
-  // WEBINAR INTEGRATION STEP:
-  // const response = await fetch(`${API_BASE_URL}/${id}`, {
-  //   method: 'PUT',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(contactData),
-  // });
-  // if (!response.ok) throw new Error('Failed to update contact');
-  // return await response.json();
-  */
+  const result = await response.json().catch(() => ({}));
 
-  const index = localContacts.findIndex((c) => c.id === id);
-  if (index === -1) {
-    throw new Error(`Contact with ID ${id} not found`);
+  if (!response.ok) {
+    throw new Error(result.message || 'Failed to update contact');
   }
 
-  const updated: Contact = {
-    ...localContacts[index],
-    name: contactData.name.trim(),
-    email: contactData.email.trim().toLowerCase(),
-    phone: contactData.phone.trim()
-  };
+  return formatContact(result.data);
+}
 
-  localContacts[index] = updated;
-  persistContacts();
+/**
+ * PATCH /api/contacts/:id/status
+ * Update contact active status in MongoDB
+ */
+export async function updateContactStatus(id: string, isActive: boolean): Promise<Contact> {
+  const response = await fetch(`${CONTACTS_URL}/${id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ isActive })
+  });
 
-  return updated;
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(result.message || 'Failed to update contact status');
+  }
+
+  return formatContact(result.data);
 }
 
 /**
  * DELETE /api/contacts/:id
- * Remove a contact document from database
+ * Remove a contact document from MongoDB
  */
 export async function deleteContact(id: string): Promise<{ success: boolean; id: string }> {
-  await delay(160);
+  const response = await fetch(`${CONTACTS_URL}/${id}`, {
+    method: 'DELETE'
+  });
 
-  /*
-  // WEBINAR INTEGRATION STEP:
-  // const response = await fetch(`${API_BASE_URL}/${id}`, {
-  //   method: 'DELETE',
-  // });
-  // if (!response.ok) throw new Error('Failed to delete contact');
-  // return await response.json();
-  */
+  const result = await response.json().catch(() => ({}));
 
-  const index = localContacts.findIndex((c) => c.id === id);
-  if (index === -1) {
-    throw new Error(`Contact with ID ${id} not found`);
+  if (!response.ok) {
+    throw new Error(result.message || 'Failed to delete contact');
   }
-
-  localContacts = localContacts.filter((c) => c.id !== id);
-  persistContacts();
 
   return { success: true, id };
 }
 
 /**
- * Helper to restore original demo contacts
+ * Reset / reload contacts from MongoDB
  */
 export async function resetToDefaultContacts(): Promise<Contact[]> {
-  await delay(100);
-  localContacts = [...INITIAL_CONTACTS];
-  persistContacts();
-  return [...localContacts];
+  return await getContacts();
 }
