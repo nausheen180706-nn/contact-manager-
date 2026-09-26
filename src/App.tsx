@@ -6,13 +6,15 @@ import { ContactList } from './components/ContactList';
 import { EditContactModal } from './components/EditContactModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { Toast } from './components/Toast';
-import { Contact, ContactFormData, ToastNotification } from './types/contact';
+import { Contact, ContactFormData, ContactStats, ToastNotification } from './types/contact';
 import * as contactApi from './services/contactApi';
 
 export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [stats, setStats] = useState<ContactStats | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
 
   // Modals state
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -35,23 +37,61 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Initial data fetch simulating GET /api/contacts
+  // Health check: GET /api/health
+  const checkHealth = useCallback(async () => {
+    const isHealthy = await contactApi.checkApiHealth();
+    setIsBackendConnected(isHealthy);
+  }, []);
+
+  // Fetch statistics: GET /api/contacts/stats
+  const fetchStats = useCallback(async () => {
+    try {
+      const statsData = await contactApi.getContactStats();
+      setStats(statsData);
+    } catch (error) {
+      console.warn('Could not fetch stats from API:', error);
+    }
+  }, []);
+
+  // Fetch all contacts: GET /api/contacts
   const fetchContacts = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await contactApi.getContacts();
       setContacts(data);
-    } catch (error) {
+      setIsBackendConnected(true);
+    } catch (error: any) {
       console.error('Error fetching contacts:', error);
-      addToast('error', 'Failed to fetch contacts from API');
+      setIsBackendConnected(false);
+      addToast('error', error.message || 'Failed to fetch contacts from server');
     } finally {
       setIsLoading(false);
     }
   }, [addToast]);
 
+  // Initial load and periodic health monitoring
   useEffect(() => {
     fetchContacts();
-  }, [fetchContacts]);
+    fetchStats();
+    checkHealth();
+
+    const interval = setInterval(checkHealth, 10000);
+    return () => clearInterval(interval);
+  }, [fetchContacts, fetchStats, checkHealth]);
+
+  // Search handler: GET /api/contacts?search=query
+  const handleSearch = useCallback(async (query: string) => {
+    try {
+      setIsLoading(true);
+      const results = await contactApi.searchContacts(query);
+      setContacts(results);
+    } catch (error: any) {
+      console.error('Error searching contacts:', error);
+      addToast('error', error.message || 'Failed to search contacts');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [addToast]);
 
   // Handler for adding a contact (POST /api/contacts)
   const handleAddContact = async (formData: ContactFormData): Promise<boolean> => {
@@ -59,11 +99,12 @@ export default function App() {
       setIsSubmitting(true);
       const newContact = await contactApi.createContact(formData);
       setContacts((prev) => [newContact, ...prev]);
+      fetchStats();
       addToast('success', `Contact "${newContact.name}" added successfully`);
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding contact:', error);
-      addToast('error', 'Failed to create contact');
+      addToast('error', error.message || 'Failed to create contact');
       return false;
     } finally {
       setIsSubmitting(false);
@@ -74,12 +115,13 @@ export default function App() {
   const handleUpdateContact = async (id: string, updatedData: ContactFormData): Promise<boolean> => {
     try {
       const updated = await contactApi.updateContact(id, updatedData);
-      setContacts((prev) => prev.map((c) => (c.id === id ? updated : c)));
-      addToast('success', `Contact "${updated.name}" updated successfully`);
+      setContacts((prev) => prev.map((c) => (c.id === id || c._id === id ? updated : c)));
+      fetchStats();
+      addToast('success', 'Contact updated successfully');
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating contact:', error);
-      addToast('error', 'Failed to update contact');
+      addToast('error', error.message || 'Failed to update contact');
       return false;
     }
   };
@@ -87,28 +129,29 @@ export default function App() {
   // Handler for deleting a contact (DELETE /api/contacts/:id)
   const handleDeleteContact = async (id: string): Promise<boolean> => {
     try {
-      const targetName = contacts.find((c) => c.id === id)?.name || 'Contact';
       await contactApi.deleteContact(id);
-      setContacts((prev) => prev.filter((c) => c.id !== id));
-      addToast('success', `${targetName} deleted successfully`);
+      setContacts((prev) => prev.filter((c) => c.id !== id && c._id !== id));
+      fetchStats();
+      addToast('success', 'Contact deleted successfully');
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting contact:', error);
-      addToast('error', 'Failed to delete contact');
+      addToast('error', error.message || 'Failed to delete contact');
       return false;
     }
   };
 
-  // Reset to default sample contacts
+  // Refresh contacts and statistics from MongoDB
   const handleResetData = async () => {
     try {
       setIsLoading(true);
-      const defaultData = await contactApi.resetToDefaultContacts();
-      setContacts(defaultData);
-      addToast('info', 'Loaded default mock contacts');
-    } catch (error) {
+      const data = await contactApi.getContacts();
+      setContacts(data);
+      await fetchStats();
+      addToast('info', 'Refreshed contacts from MongoDB');
+    } catch (error: any) {
       console.error('Error resetting data:', error);
-      addToast('error', 'Failed to reload mock contacts');
+      addToast('error', error.message || 'Failed to reload contacts');
     } finally {
       setIsLoading(false);
     }
@@ -117,8 +160,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
       
-      {/* 1. NAVBAR */}
-      <Navbar />
+      {/* 1. NAVBAR WITH BACKEND HEALTH STATUS */}
+      <Navbar isBackendConnected={isBackendConnected} />
 
       {/* MAIN CONTAINER */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-8 sm:space-y-10">
@@ -134,8 +177,8 @@ export default function App() {
             </p>
           </div>
 
-          {/* 3 STATS CARDS */}
-          <StatsCards contacts={contacts} />
+          {/* 3 STATS CARDS (CALCULATED FROM MONGODB) */}
+          <StatsCards contacts={contacts} stats={stats} />
         </section>
 
         {/* 3 & 4. CORE APPLICATION WORKSPACE: ADD FORM + DIRECTORY LIST */}
@@ -157,6 +200,7 @@ export default function App() {
               onEdit={(contact) => setEditingContact(contact)}
               onDelete={(contact) => setDeletingContact(contact)}
               onResetData={handleResetData}
+              onSearch={handleSearch}
             />
           </div>
 
@@ -170,11 +214,11 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">Contact Manager</span>
             <span>·</span>
-            <span>CRUD Application UI</span>
+            <span>Full Stack CRUD Application</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-slate-400">Stack:</span>
-            <span className="text-slate-700 font-medium">React · TypeScript · Tailwind CSS</span>
+            <span className="text-slate-700 font-medium">React · TypeScript · Express · MongoDB</span>
           </div>
         </div>
       </footer>

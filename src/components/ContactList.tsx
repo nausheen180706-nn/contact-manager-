@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Edit2, Trash2, Mail, Phone, Calendar, Users, RefreshCw } from 'lucide-react';
 import { Contact } from '../types/contact';
 import { ContactCard } from './ContactCard';
@@ -10,6 +10,7 @@ interface ContactListProps {
   onEdit: (contact: Contact) => void;
   onDelete: (contact: Contact) => void;
   onResetData: () => void;
+  onSearch?: (query: string) => void;
 }
 
 export const ContactList: React.FC<ContactListProps> = ({
@@ -17,12 +18,27 @@ export const ContactList: React.FC<ContactListProps> = ({
   isLoading,
   onEdit,
   onDelete,
-  onResetData
+  onResetData,
+  onSearch
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Filter contacts by Name, Email, Phone
-  const filteredContacts = useMemo(() => {
+  // Small debounce to trigger server-side search via GET /api/contacts?search=query
+  useEffect(() => {
+    if (!onSearch) return;
+
+    const timer = setTimeout(() => {
+      onSearch(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, onSearch]);
+
+  // When server search is active, 'contacts' is already filtered by MongoDB;
+  // otherwise fallback to in-memory filter
+  const displayedContacts = useMemo(() => {
+    if (onSearch) return contacts;
+
     const query = searchQuery.trim().toLowerCase();
     if (!query) return contacts;
 
@@ -32,7 +48,7 @@ export const ContactList: React.FC<ContactListProps> = ({
       const matchPhone = c.phone.toLowerCase().includes(query);
       return matchName || matchEmail || matchPhone;
     });
-  }, [contacts, searchQuery]);
+  }, [contacts, searchQuery, onSearch]);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -45,7 +61,7 @@ export const ContactList: React.FC<ContactListProps> = ({
               Contact Directory
             </h2>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 tabular-nums">
-              {filteredContacts.length} {filteredContacts.length === 1 ? 'contact' : 'contacts'}
+              {displayedContacts.length} {displayedContacts.length === 1 ? 'contact' : 'contacts'}
             </span>
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
@@ -78,9 +94,9 @@ export const ContactList: React.FC<ContactListProps> = ({
 
           <button
             onClick={onResetData}
-            title="Reset to default mock contacts"
+            title="Refresh contacts from MongoDB"
             className="p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors shrink-0"
-            aria-label="Reset demo sample data"
+            aria-label="Refresh contacts"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -92,10 +108,10 @@ export const ContactList: React.FC<ContactListProps> = ({
         // Loading state
         <div className="p-12 text-center">
           <div className="w-8 h-8 border-3 border-blue-600/20 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm font-medium text-slate-600">Simulating GET /api/contacts...</p>
+          <p className="text-sm font-medium text-slate-600">Fetching from Express & MongoDB...</p>
         </div>
-      ) : filteredContacts.length === 0 ? (
-        // Empty State (Section 8)
+      ) : displayedContacts.length === 0 ? (
+        // Empty State
         <div className="p-12 text-center max-w-sm mx-auto">
           <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
             <Users className="w-6 h-6" />
@@ -121,13 +137,13 @@ export const ContactList: React.FC<ContactListProps> = ({
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Load Sample Contacts</span>
+              <span>Refresh Contacts</span>
             </button>
           )}
         </div>
       ) : (
         <>
-          {/* Desktop Table View (hidden on mobile) */}
+          {/* Desktop Table View */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -140,7 +156,7 @@ export const ContactList: React.FC<ContactListProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
-                {filteredContacts.map((contact) => {
+                {displayedContacts.map((contact) => {
                   const initials = getInitials(contact.name);
                   const formattedDate = new Date(contact.createdAt).toLocaleDateString('en-US', {
                     month: 'short',
@@ -150,7 +166,7 @@ export const ContactList: React.FC<ContactListProps> = ({
 
                   return (
                     <tr
-                      key={contact.id}
+                      key={contact.id || contact._id}
                       className="hover:bg-slate-50/80 transition-colors group"
                     >
                       {/* Contact: Avatar + Name */}
@@ -168,7 +184,7 @@ export const ContactList: React.FC<ContactListProps> = ({
                               {contact.name}
                             </div>
                             <div className="text-[11px] font-mono text-slate-400 truncate">
-                              ID: {contact.id}
+                              ID: {contact.id || contact._id}
                             </div>
                           </div>
                         </div>
@@ -229,11 +245,11 @@ export const ContactList: React.FC<ContactListProps> = ({
             </table>
           </div>
 
-          {/* Mobile Card Grid (hidden on desktop) */}
+          {/* Mobile Card Grid */}
           <div className="md:hidden p-4 space-y-3 bg-slate-50/50">
-            {filteredContacts.map((contact) => (
+            {displayedContacts.map((contact) => (
               <ContactCard
-                key={contact.id}
+                key={contact.id || contact._id}
                 contact={contact}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -246,11 +262,11 @@ export const ContactList: React.FC<ContactListProps> = ({
       {/* Footer count indicator */}
       <div className="px-6 py-3 bg-slate-50/70 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
         <span>
-          Showing <strong className="text-slate-800 tabular-nums">{filteredContacts.length}</strong> of{' '}
+          Showing <strong className="text-slate-800 tabular-nums">{displayedContacts.length}</strong> of{' '}
           <strong className="text-slate-800 tabular-nums">{contacts.length}</strong> contacts
         </span>
         <span className="text-[11px] text-slate-400">
-          Client state synchronized with mock REST endpoints
+          Client state synchronized with MongoDB REST endpoints
         </span>
       </div>
 

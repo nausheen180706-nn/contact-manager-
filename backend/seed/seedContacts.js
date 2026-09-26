@@ -1,6 +1,14 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const path = require('path');
+const dns = require('dns');
+
+// Fix for Windows / router DNS failing to resolve MongoDB Atlas SRV records
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+} catch (err) {
+  // Gracefully fallback to default resolver
+}
 
 // Load environment variables from backend/.env
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -68,8 +76,8 @@ const sampleContacts = [
 
 const seedData = async () => {
   try {
-    const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/contact_manager';
-    console.log(`Connecting to MongoDB for seeding at: ${mongoUri}...`);
+    const mongoUri = process.env.MONGO_URI;
+    console.log(`Connecting to MongoDB Atlas for seeding...`);
     
     await mongoose.connect(mongoUri);
     console.log('MongoDB connected successfully.');
@@ -80,7 +88,7 @@ const seedData = async () => {
 
     // Insert sample contacts
     const createdContacts = await Contact.insertMany(sampleContacts);
-    console.log(`Successfully seeded ${createdContacts.length} contacts into MongoDB!`);
+    console.log(`Successfully seeded ${createdContacts.length} contacts into MongoDB Atlas!`);
 
     await mongoose.connection.close();
     console.log('Database connection closed.');

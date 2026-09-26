@@ -1,17 +1,16 @@
 import React from 'react';
 import { Users, UserCheck, Clock } from 'lucide-react';
-import { Contact } from '../types/contact';
+import { Contact, ContactStats } from '../types/contact';
 
 interface StatsCardsProps {
   contacts: Contact[];
+  stats?: ContactStats | null;
 }
 
-export const StatsCards: React.FC<StatsCardsProps> = ({ contacts }) => {
-  const total = contacts.length;
-  const active = contacts.filter((c) => c.status !== 'inactive').length;
-  
-  // Calculate contacts added in the last 14 days or recent additions
-  const recentlyAdded = contacts.length > 0 ? Math.min(contacts.length, 3) : 0;
+export const StatsCards: React.FC<StatsCardsProps> = ({ contacts, stats }) => {
+  const total = stats ? stats.totalContacts : contacts.length;
+  const active = stats ? stats.activeContacts : contacts.filter((c) => c.status !== 'inactive').length;
+  const recentlyAdded = stats ? stats.recentlyAdded : (contacts.length > 0 ? Math.min(contacts.length, 3) : 0);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-8">
@@ -81,7 +80,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ contacts }) => {
           </span>
         </div>
         <p className="mt-1 text-xs text-slate-400">
-          POST /api/contacts submissions
+          Created in last 7 days
         </p>
       </div>
 
