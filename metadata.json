@@ -1,0 +1,6 @@
+{
+  "name": "Contact Manager",
+  "description": "A modern, beginner-friendly Contact Manager web application designed for Full Stack Development webinars demonstrating REST API integration with React, Express, and MongoDB.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
